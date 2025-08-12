@@ -5,6 +5,7 @@ import torchvision.transforms as transforms
 import torch
 from PIL import Image
 import matplotlib.pyplot as plt
+import argparse
 
 class AdversarialNoise:
     '''A class to create adversarial examples'''
@@ -77,7 +78,7 @@ class AdversarialNoise:
         # return the altered image
         return perturbed_image, pre_proc_img, predicted_label, new_predicted_label
     
-def plot_images(original, original_label, altered, altered_label, true_label, target_label):
+def plot_images(original, original_label, altered, altered_label, target_label):
     '''Plots the original and altered images side by side.'''
 
     image_np = np.transpose(original.squeeze().detach().numpy(), (1, 2, 0))
@@ -85,7 +86,7 @@ def plot_images(original, original_label, altered, altered_label, true_label, ta
 
     fig, ax = plt.subplots(1, 2, figsize=(12, 6))
     ax[0].imshow(image_np)
-    ax[0].set_title('Original Image, Predicted: {}, True: {}'.format(original_label, true_label))
+    ax[0].set_title('Original Image, Predicted: {}'.format(original_label))
     ax[0].axis('off')
 
     ax[1].imshow(perturbed_image_np)
@@ -97,17 +98,22 @@ def plot_images(original, original_label, altered, altered_label, true_label, ta
 
 def main():
 
+    # Set up argument parser
+    parser = argparse.ArgumentParser(description="Adversarial Noise Generation")
+    parser.add_argument('--image_path', type=str, default='data/n01443537_goldfish.jpeg', help='Path to the input image')
+    parser.add_argument('--target_class', type=str, default='hen', help='Target class for adversarial attack')
+
+    args = parser.parse_args()
+
     # Load an image from the local filesystem
-    image = Image.open("data/n01443537_goldfish.jpeg").convert("RGB")  # Convert image to RGB format
-    true_class = "goldfish"
-    target_class = "hen"
+    image = Image.open(args.image_path).convert("RGB")  # Convert image to RGB format
+    target_class = args.target_class
 
     # Initialize model with the best available weights
     weights = ResNet50_Weights.DEFAULT
     model = resnet50(weights=weights)
     model.eval()
     
-    true_class_index = weights.meta["categories"].index(true_class)
     target_class_index = weights.meta["categories"].index(target_class)
 
     # Initialize the inference transforms
@@ -121,7 +127,14 @@ def main():
     for epsilon in epsilons:
 
         altered_image, preprocessed_image, predicted_label, new_predicted_label = AdversarialNoise(model, image, 1, target_class, epsilon).altered_image()
-        fig = plot_images(preprocessed_image, predicted_label, altered_image, new_predicted_label, true_class_index, target_class_index)
+        fig = plot_images(
+            preprocessed_image, 
+            weights.meta["categories"][predicted_label], 
+            altered_image, 
+            weights.meta["categories"][new_predicted_label], 
+            weights.meta["categories"][target_class_index]
+            )
+        
         plt.savefig(f"data/adversarial_noise_epsilon_{epsilon}.png")
 
 if __name__ == "__main__":
