@@ -92,31 +92,37 @@ def plot_images(original, original_label, altered, altered_label, true_label, ta
     ax[1].set_title('Altered Image with Adversarial Noise, Predicted: {}, Target: {}'.format(altered_label, target_label))
     ax[1].axis('off')
 
-    plt.savefig("data/adversarial_comparison.png")
+    return fig
 
 
 def main():
 
     # Load an image from the local filesystem
     image = Image.open("data/n01443537_goldfish.jpeg").convert("RGB")  # Convert image to RGB format
+    true_class = "goldfish"
     target_class = "hen"
 
     # Initialize model with the best available weights
     weights = ResNet50_Weights.DEFAULT
     model = resnet50(weights=weights)
     model.eval()
+    
+    true_class_index = weights.meta["categories"].index(true_class)
+    target_class_index = weights.meta["categories"].index(target_class)
 
     # Initialize the inference transforms
     preprocess = weights.transforms()
 
     # Define the epsilon values for noise - these should be in the range [0,1]
-    #epsilons = [0, .05, .1, .15, .2, .25, .3]
+    epsilons = [0, .05, .1, .15, .2, .25, .3]
+
     # Set random seed for reproducibility
     torch.manual_seed(42)
+    for epsilon in epsilons:
 
-    altered_image, preprocessed_image, predicted_label, new_predicted_label = AdversarialNoise(model, image, 1, target_class, 0.1).altered_image()
-
-    plot_images(preprocessed_image, predicted_label, altered_image, new_predicted_label, 1, 1)
+        altered_image, preprocessed_image, predicted_label, new_predicted_label = AdversarialNoise(model, image, 1, target_class, epsilon).altered_image()
+        fig = plot_images(preprocessed_image, predicted_label, altered_image, new_predicted_label, true_class_index, target_class_index)
+        plt.savefig(f"data/adversarial_noise_epsilon_{epsilon}.png")
 
 if __name__ == "__main__":
     main()
