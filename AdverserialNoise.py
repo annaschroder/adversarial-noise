@@ -1,8 +1,10 @@
 # import necessary libraries
+import numpy as np
 from torchvision.models import resnet50, ResNet50_Weights
 import torchvision.transforms as transforms
 import torch
 from PIL import Image
+import matplotlib.pyplot as plt
 
 class AdversarialNoise:
     '''A class to create adversarial examples'''
@@ -73,7 +75,24 @@ class AdversarialNoise:
         # ensure the altered image matches the target class
 
         # return the altered image
-        return perturbed_image
+        return perturbed_image, pre_proc_img, predicted_label, new_predicted_label
+    
+def plot_images(original, original_label, altered, altered_label, true_label, target_label):
+    '''Plots the original and altered images side by side.'''
+
+    image_np = np.transpose(original.squeeze().detach().numpy(), (1, 2, 0))
+    perturbed_image_np = np.transpose(altered.squeeze().detach().numpy(), (1, 2, 0))
+
+    fig, ax = plt.subplots(1, 2, figsize=(12, 6))
+    ax[0].imshow(image_np)
+    ax[0].set_title('Original Image, Predicted: {}, True: {}'.format(original_label, true_label))
+    ax[0].axis('off')
+
+    ax[1].imshow(perturbed_image_np)
+    ax[1].set_title('Altered Image with Adversarial Noise, Predicted: {}, Target: {}'.format(altered_label, target_label))
+    ax[1].axis('off')
+
+    plt.savefig("data/adversarial_comparison.png")
 
 
 def main():
@@ -95,8 +114,9 @@ def main():
     # Set random seed for reproducibility
     torch.manual_seed(42)
 
-    altered_image = AdversarialNoise(model, image, 1, target_class, 0.1).altered_image()
+    altered_image, preprocessed_image, predicted_label, new_predicted_label = AdversarialNoise(model, image, 1, target_class, 0.1).altered_image()
 
+    plot_images(preprocessed_image, predicted_label, altered_image, new_predicted_label, 1, 1)
 
 if __name__ == "__main__":
     main()
