@@ -9,12 +9,11 @@ import argparse
 
 class AdversarialNoise:
     '''A class to create adversarial examples'''
-    def __init__(self, model, input_data, true_label, target, epsilon):
+    def __init__(self, model, input_data, target_label, epsilon):
         '''Initializes the AdversarialNoise class with a model, input data, and target.'''
         self.model = model
         self.input_data = input_data
-        self.true_label = torch.tensor([true_label]) 
-        self.target = target
+        self.target_label = torch.tensor([target_label])
         self.epsilon = epsilon
 
     def preprocess_image(self, image):
@@ -26,14 +25,14 @@ class AdversarialNoise:
             transforms.ToTensor(),
         ])
         return preprocess(image).unsqueeze(0)
-
-    def fgsm_attack(self, image, data_grad):
+    
+    def fgsm_attack_targetted(self, image, data_grad):
         # Collect the element-wise sign of the data gradient
         sign_data_grad = data_grad.sign()
         
         # Create the perturbed image by adjusting each pixel of the input image
-        perturbed_image = image + self.epsilon * sign_data_grad
-        
+        perturbed_image = image - (self.epsilon * sign_data_grad)
+
         # Clip the perturbed image values to ensure they stay within the valid range
         perturbed_image = torch.clamp(perturbed_image, 0, 1)
         
@@ -42,16 +41,13 @@ class AdversarialNoise:
     def classify(self):
         '''Classifies the input image using the model.'''
         return
-
-    def loss_function(self, model_output, true_label):
-        '''Computes the loss between the model output and the target.'''
-        return torch.nn.CrossEntropyLoss()(model_output, true_label)
     
     def altered_image(self):
         '''Returns the altered image with adversarial noise.'''
 
         # preprocess the image
         pre_proc_img = self.preprocess_image(self.input_data)
+
         # enables us to compute gradients with respect to the input image
         pre_proc_img.requires_grad = True
 
@@ -59,7 +55,8 @@ class AdversarialNoise:
         output = self.model(pre_proc_img)
         predicted_label = torch.argmax(output, 1).item()
 
-        loss = self.loss_function(output, self.true_label)
+        loss_function = torch.nn.CrossEntropyLoss()
+        loss = loss_function(output, self.target_label)
 
         # backwards pass to compute gradients
         self.model.zero_grad()
@@ -67,11 +64,13 @@ class AdversarialNoise:
         data_grad = pre_proc_img.grad.data
 
         # generate adversarial noise using FGSM
-        perturbed_image = self.fgsm_attack(pre_proc_img, data_grad)
+        perturbed_image = self.fgsm_attack_targetted(pre_proc_img, data_grad)
 
         # classify the altered image
         output = self.model(perturbed_image)
         new_predicted_label = torch.argmax(output, 1).item()
+
+        # find probability
 
         # ensure the altered image matches the target class
 
@@ -102,7 +101,6 @@ def main():
     parser = argparse.ArgumentParser(description="Adversarial Noise Generation")
     parser.add_argument('--image_path', type=str, default='data/n01443537_goldfish.jpeg', help='Path to the input image')
     parser.add_argument('--target_class', type=str, default='hen', help='Target class for adversarial attack')
-
     args = parser.parse_args()
 
     # Load an image from the local filesystem
@@ -114,19 +112,19 @@ def main():
     model = resnet50(weights=weights)
     model.eval()
     
+    # could make this a function to avoid repetition
     target_class_index = weights.meta["categories"].index(target_class)
-
-    # Initialize the inference transforms
-    preprocess = weights.transforms()
 
     # Define the epsilon values for noise - these should be in the range [0,1]
     epsilons = [0, .05, .1, .15, .2, .25, .3]
 
     # Set random seed for reproducibility
     torch.manual_seed(42)
+
+    # Loop through each epsilon value and generate adversarial noise
     for epsilon in epsilons:
 
-        altered_image, preprocessed_image, predicted_label, new_predicted_label = AdversarialNoise(model, image, 1, target_class, epsilon).altered_image()
+        altered_image, preprocessed_image, predicted_label, new_predicted_label = AdversarialNoise(model, image, target_class_index, epsilon).altered_image()
         fig = plot_images(
             preprocessed_image, 
             weights.meta["categories"][predicted_label], 
