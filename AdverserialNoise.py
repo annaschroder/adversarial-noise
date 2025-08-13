@@ -41,28 +41,6 @@ class AdversarialNoise:
         ])
         return preprocess(image).unsqueeze(0)
     
-    def fgsm_attack_targetted(self, image, data_grad):
-        '''Generates a perturbed image using the Fast Gradient Sign Method (FGSM) for targeted attacks.
-
-        Args:
-            image: The input image tensor.
-            data_grad: The gradient of the loss with respect to the input image.    
-
-        Returns:
-            perturbed_image: The perturbed image tensor after applying adversarial noise.
-        '''
-
-        # Collect the element-wise sign of the data gradient
-        sign_data_grad = data_grad.sign()
-        
-        # Create the perturbed image by adjusting each pixel of the input image
-        perturbed_image = image - (self.epsilon * sign_data_grad)
-
-        # Clip the perturbed image values to ensure they stay within the valid range
-        perturbed_image = torch.clamp(perturbed_image, 0, 1).detach()
-        
-        return perturbed_image
-    
     def fgsm_attack_targetted_iterative_step(self, perturbed_image, image, data_grad, alpha=0.01):
         '''Moving one step of the iterative approach using the Fast Gradient Sign Method (FGSM) for targeted attacks.
 
@@ -166,10 +144,12 @@ class AdversarialNoise:
             f"(conf={perturbed_prob[0, self.target_label.item()].item():.4f})")
 
         # ensure the altered image matches the target class
-        if perturbed_predicted_label != self.target_label.item():
-            print(f"Warning: The predicted label {perturbed_predicted_label} of the altered image does not match the target class {self.target_label.item()}.")
-        
-        return perturbed_image, img, original_predicted_label, perturbed_predicted_label
+        if perturbed_predicted_label == self.target_label.item():
+            successful_attack = True
+        else:
+            successful_attack = False
+
+        return perturbed_image, img, original_predicted_label, perturbed_predicted_label,successful_attack
     
     
 def plot_images(original, original_label, altered, altered_label, target_label):
@@ -229,20 +209,27 @@ def main():
     torch.manual_seed(42)
 
     # Loop through each epsilon value and generate adversarial noise
-    for epsilon in epsilons:
+    sucessful_attack = False
+    epsilon_i = 0
 
-        adversarial_noise_generator = AdversarialNoise(model,image, target_class_index, epsilon)
-        altered_image, preprocessed_image, predicted_label, new_predicted_label = adversarial_noise_generator.altered_image()
+    while not sucessful_attack:
+    #for epsilon in epsilons:
 
-        fig = plot_images(
-            preprocessed_image, 
-            weights.meta["categories"][predicted_label], 
-            altered_image, 
-            weights.meta["categories"][new_predicted_label], 
-            weights.meta["categories"][target_class_index]
-            )
-        
-        plt.savefig(f"data/adversarial_noise_epsilon_{epsilon}.png")
+        adversarial_noise_generator = AdversarialNoise(model,image, target_class_index, epsilons[epsilon_i])
+        altered_image, preprocessed_image, predicted_label, new_predicted_label,sucessful_attack = adversarial_noise_generator.altered_image()
+
+        if sucessful_attack:
+            # only plot if the attack was successful   
+            fig = plot_images(
+                preprocessed_image, 
+                weights.meta["categories"][predicted_label], 
+                altered_image, 
+                weights.meta["categories"][new_predicted_label], 
+                weights.meta["categories"][target_class_index]
+                )
+
+        plt.savefig(f"data/adversarial_noise_epsilon_{epsilons[epsilon_i]}.png")
+        epsilon_i += 1
 
 if __name__ == "__main__":
     main()
