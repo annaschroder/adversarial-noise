@@ -9,16 +9,30 @@ import argparse
 
 class AdversarialNoise:
     '''A class to create adversarial examples'''
+    
     def __init__(self, model, input_data, target_label, epsilon):
-        '''Initializes the AdversarialNoise class with a model, input data, and target.'''
+        '''Initializes the AdversarialNoise class with a model, input data, and target and epsilon.
+        
+        Args:
+            model: The model to be attacked.
+            input_data: The input image data to be perturbed.
+            target_label: The class which we are aiming to misclassify as.
+            epsilon: The perturbation magnitude for the adversarial noise.
+        '''
         self.model = model
         self.input_data = input_data
         self.target_label = torch.tensor([target_label])
         self.epsilon = epsilon
 
     def preprocess_image(self, image):
-        '''Preprocesses the input image for the model.'''
-        # try to understand why these settings are used
+        '''Preprocesses the input image for the model (without the normalisation - we'll do this when we put the image into the model).
+        
+        Args:
+            image: The input image to be preprocessed.
+
+        Returns:
+            A preprocessed image tensor.
+        '''
         
         preprocess = transforms.Compose([
             transforms.Resize(256),
@@ -28,6 +42,16 @@ class AdversarialNoise:
         return preprocess(image).unsqueeze(0)
     
     def fgsm_attack_targetted(self, image, data_grad):
+        '''Generates a perturbed image using the Fast Gradient Sign Method (FGSM) for targeted attacks.
+
+        Args:
+            image: The input image tensor.
+            data_grad: The gradient of the loss with respect to the input image.    
+
+        Returns:
+            perturbed_image: The perturbed image tensor after applying adversarial noise.
+        '''
+
         # Collect the element-wise sign of the data gradient
         sign_data_grad = data_grad.sign()
         
@@ -39,12 +63,36 @@ class AdversarialNoise:
         
         return perturbed_image
 
-    def classify(self):
-        '''Classifies the input image using the model.'''
-        return
-    
+    def classify(self, image, mean, std):
+        '''Classifies an input image using the model.
+        
+        Args:
+            image: The input image tensor to be classified.
+            mean: The mean values for normalisation.
+            std: The standard deviation values for normalisation.
+            
+        Returns:
+            output: The model's output logits for the input image.
+            predicted_label: The predicted label of the input image.
+            prob: The probabilities of each class for the input image.
+        '''
+
+        # input normalised image
+        output = self.model((image - mean) / std)
+        predicted_label = torch.argmax(output, 1).item()
+        probabilities = torch.softmax(output, dim=1)
+
+        return output, predicted_label, probabilities
+
     def altered_image(self):
-        '''Returns the altered image with adversarial noise.'''
+        '''Runs the adversarial noise generation process and returns the altered image, original image, and their predicted labels.
+        
+        Returns:
+            perturbed_image: The image after applying the adversarial attack.
+            img: The original preprocessed image tensor.
+            original_predicted_label: The predicted label of the original image.
+            perturbed_predicted_label: The predicted label of the image after the adversarial attack.
+        '''
 
         mean = torch.tensor([0.485, 0.456, 0.406]).view(1,3,1,1)
         std  = torch.tensor([0.229, 0.224, 0.225]).view(1,3,1,1)
@@ -56,16 +104,11 @@ class AdversarialNoise:
         img.requires_grad = True
 
         # forward pass through the model
-        original_output = self.model((img - mean) / std)
-        original_predicted_label = torch.argmax(original_output, 1).item()
-        original_prob = torch.softmax(original_output, dim=1)
-
-        conf_orig_pred = original_prob[0, original_predicted_label].item()
-        conf_orig_target = original_prob[0, self.target_label.item()].item()
+        original_output, original_predicted_label, original_prob = self.classify(img, mean, std)
 
         print(f"Before attack: predicted={original_predicted_label} "
-            f"(conf={conf_orig_pred:.4f}), target={self.target_label.item()} "
-            f"(conf={conf_orig_target:.4f})")
+            f"(conf={original_prob[0, original_predicted_label].item():.4f}), target={self.target_label.item()} "
+            f"(conf={original_prob[0, self.target_label.item()].item():.4f})")
 
         loss_function = torch.nn.CrossEntropyLoss()
         loss = loss_function(original_output, self.target_label)
@@ -73,21 +116,17 @@ class AdversarialNoise:
         # backwards pass to compute gradients
         self.model.zero_grad()
         loss.backward()
-        data_grad = img.grad.data #/ std # correct scaling to pixel space
+        data_grad = img.grad.data
 
         # generate adversarial noise using FGSM
         perturbed_image = self.fgsm_attack_targetted(img, data_grad)
 
         # classify the altered image
-        perturbed_output = self.model((perturbed_image - mean) / std)
-        perturbed_predicted_label = torch.argmax(perturbed_output, 1).item()
-        perturbed_prob = torch.softmax(perturbed_output, dim=1)
+        _, perturbed_predicted_label, perturbed_prob = self.classify(perturbed_image, mean, std)
 
-        conf_perturbed_pred = perturbed_prob[0, perturbed_predicted_label].item()
-        conf_perturbed_target = perturbed_prob[0, self.target_label.item()].item()
         print(f"After attack: predicted={perturbed_predicted_label} "
-            f"(conf={conf_perturbed_pred:.4f}), target={self.target_label.item()} "
-            f"(conf={conf_perturbed_target:.4f})")
+            f"(conf={perturbed_prob[0, perturbed_predicted_label].item():.4f}), target={self.target_label.item()} "
+            f"(conf={perturbed_prob[0, self.target_label.item()].item():.4f})")
 
         # ensure the altered image matches the target class
         if perturbed_predicted_label != self.target_label.item():
@@ -97,11 +136,23 @@ class AdversarialNoise:
     
     
 def plot_images(original, original_label, altered, altered_label, target_label):
-    '''Plots the original and altered images side by side.'''
+    '''Function to plot the results of the adversarial noise generation.
+    Args:
+        original: The original preprocessed image tensor.
+        original_label: The predicted label of the original image.
+        altered: The perturbed image tensor after the adversarial attack.
+        altered_label: The predicted label after the adversarial attack.
+        target_label: The target class label for the adversarial attack.
+        
+    Returns:
+        fig: A matplotlib figure containing the original and perturbed images with their predicted labels.
+    '''
 
+    # Convert tensors to numpy arrays for plotting
     image_np = np.transpose(original.squeeze().detach().numpy(), (1, 2, 0))
     perturbed_image_np = np.transpose(altered.squeeze().detach().numpy(), (1, 2, 0))
 
+    # plot as two subplots with predicted/target labels in titles
     fig, ax = plt.subplots(1, 2, figsize=(12, 6))
     ax[0].imshow(image_np)
     ax[0].set_title('Original Image, Predicted: {}'.format(original_label))
@@ -115,6 +166,7 @@ def plot_images(original, original_label, altered, altered_label, target_label):
 
 
 def main():
+    '''Main function to run the adversarial noise generation process.'''
 
     # Set up argument parser
     parser = argparse.ArgumentParser(description="Adversarial Noise Generation")
@@ -144,7 +196,9 @@ def main():
     # Loop through each epsilon value and generate adversarial noise
     for epsilon in epsilons:
 
-        altered_image, preprocessed_image, predicted_label, new_predicted_label = AdversarialNoise(model, image, target_class_index, epsilon).altered_image()
+        adversarial_noise_generator = AdversarialNoise(model,image, target_class_index, epsilon)
+        altered_image, preprocessed_image, predicted_label, new_predicted_label = adversarial_noise_generator.altered_image()
+
         fig = plot_images(
             preprocessed_image, 
             weights.meta["categories"][predicted_label], 
