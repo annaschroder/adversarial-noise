@@ -62,6 +62,32 @@ class AdversarialNoise:
         perturbed_image = torch.clamp(perturbed_image, 0, 1).detach()
         
         return perturbed_image
+    
+    def fgsm_attack_targetted_iterative_step(self, perturbed_image, image, data_grad, alpha=0.01):
+        '''Moving one step of the iterative approach using the Fast Gradient Sign Method (FGSM) for targeted attacks.
+
+        Args:
+            image: The original input image tensor.
+            perturbed_image: The current perturbed image tensor.
+            data_grad: The gradient of the loss with respect to the input image.   
+            alpha: The step size for the iterative attack. 
+
+        Returns:
+            perturbed_image: The perturbed image tensor after applying the iterative adversarial noise step.
+        '''
+        # take a step in the direction of the gradient
+        perturbed_image = perturbed_image - alpha * data_grad.sign()
+
+        # Clip pertubation to ensure they stay within the valid range
+        pertubation = torch.clamp(perturbed_image - image, -self.epsilon, self.epsilon)
+
+        # Apply the perturbation to the original image
+        perturbed_image = image + pertubation
+        
+        # Clip the perturbed image values to ensure they stay within the valid range
+        perturbed_image = torch.clamp(perturbed_image, 0, 1).detach()
+
+        return perturbed_image
 
     def classify(self, image, mean, std):
         '''Classifies an input image using the model.
@@ -119,7 +145,18 @@ class AdversarialNoise:
         data_grad = img.grad.data
 
         # generate adversarial noise using FGSM
-        perturbed_image = self.fgsm_attack_targetted(img, data_grad)
+        perturbed_image = img.detach().clone()
+
+        Niter = 10  # Number of iterations for iterative FGSM
+        for _ in range(Niter):
+            perturbed_image.requires_grad = True
+            model_output = self.model((perturbed_image - mean) / std)
+            loss = torch.nn.CrossEntropyLoss()(model_output, self.target_label)
+            self.model.zero_grad()
+            loss.backward()
+
+            # take a step in the direction of the gradient
+            perturbed_image = self.fgsm_attack_targetted_iterative_step(perturbed_image, img, perturbed_image.grad.data)
 
         # classify the altered image
         _, perturbed_predicted_label, perturbed_prob = self.classify(perturbed_image, mean, std)
@@ -183,12 +220,10 @@ def main():
     model = resnet50(weights=weights)
     model.eval()
     
-    # could make this a function to avoid repetition
     target_class_index = weights.meta["categories"].index(target_class)
 
     # Define the epsilon values for noise - these should be in the range [0,1]
-    epsilons = [0, .05, .1, .15, .2, .25, .3, .35, .4, .45, .5]
-    #epsilons = [0, .01, .02, .03, .04, .5, .06, .07]
+    epsilons = [0, .01, .02, .03, .04, .05, .06, .07]
 
     # Set random seed for reproducibility
     torch.manual_seed(42)
