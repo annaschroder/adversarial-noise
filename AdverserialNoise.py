@@ -19,10 +19,11 @@ class AdversarialNoise:
     def preprocess_image(self, image):
         '''Preprocesses the input image for the model.'''
         # try to understand why these settings are used
+        
         preprocess = transforms.Compose([
             transforms.Resize(256),
             transforms.CenterCrop(224),
-            transforms.ToTensor(),
+            transforms.ToTensor()
         ])
         return preprocess(image).unsqueeze(0)
     
@@ -34,7 +35,7 @@ class AdversarialNoise:
         perturbed_image = image - (self.epsilon * sign_data_grad)
 
         # Clip the perturbed image values to ensure they stay within the valid range
-        perturbed_image = torch.clamp(perturbed_image, 0, 1)
+        perturbed_image = torch.clamp(perturbed_image, 0, 1).detach()
         
         return perturbed_image
 
@@ -45,37 +46,55 @@ class AdversarialNoise:
     def altered_image(self):
         '''Returns the altered image with adversarial noise.'''
 
+        mean = torch.tensor([0.485, 0.456, 0.406]).view(1,3,1,1)
+        std  = torch.tensor([0.229, 0.224, 0.225]).view(1,3,1,1)
+
         # preprocess the image
-        pre_proc_img = self.preprocess_image(self.input_data)
+        img = self.preprocess_image(self.input_data)
 
         # enables us to compute gradients with respect to the input image
-        pre_proc_img.requires_grad = True
+        img.requires_grad = True
 
         # forward pass through the model
-        output = self.model(pre_proc_img)
-        predicted_label = torch.argmax(output, 1).item()
+        original_output = self.model((img - mean) / std)
+        original_predicted_label = torch.argmax(original_output, 1).item()
+        original_prob = torch.softmax(original_output, dim=1)
+
+        conf_orig_pred = original_prob[0, original_predicted_label].item()
+        conf_orig_target = original_prob[0, self.target_label.item()].item()
+
+        print(f"Before attack: predicted={original_predicted_label} "
+            f"(conf={conf_orig_pred:.4f}), target={self.target_label.item()} "
+            f"(conf={conf_orig_target:.4f})")
 
         loss_function = torch.nn.CrossEntropyLoss()
-        loss = loss_function(output, self.target_label)
+        loss = loss_function(original_output, self.target_label)
 
         # backwards pass to compute gradients
         self.model.zero_grad()
         loss.backward()
-        data_grad = pre_proc_img.grad.data
+        data_grad = img.grad.data #/ std # correct scaling to pixel space
 
         # generate adversarial noise using FGSM
-        perturbed_image = self.fgsm_attack_targetted(pre_proc_img, data_grad)
+        perturbed_image = self.fgsm_attack_targetted(img, data_grad)
 
         # classify the altered image
-        output = self.model(perturbed_image)
-        new_predicted_label = torch.argmax(output, 1).item()
+        perturbed_output = self.model((perturbed_image - mean) / std)
+        perturbed_predicted_label = torch.argmax(perturbed_output, 1).item()
+        perturbed_prob = torch.softmax(perturbed_output, dim=1)
 
-        # find probability
+        conf_perturbed_pred = perturbed_prob[0, perturbed_predicted_label].item()
+        conf_perturbed_target = perturbed_prob[0, self.target_label.item()].item()
+        print(f"After attack: predicted={perturbed_predicted_label} "
+            f"(conf={conf_perturbed_pred:.4f}), target={self.target_label.item()} "
+            f"(conf={conf_perturbed_target:.4f})")
 
         # ensure the altered image matches the target class
-
-        # return the altered image
-        return perturbed_image, pre_proc_img, predicted_label, new_predicted_label
+        if perturbed_predicted_label != self.target_label.item():
+            print(f"Warning: The predicted label {perturbed_predicted_label} of the altered image does not match the target class {self.target_label.item()}.")
+        
+        return perturbed_image, img, original_predicted_label, perturbed_predicted_label
+    
     
 def plot_images(original, original_label, altered, altered_label, target_label):
     '''Plots the original and altered images side by side.'''
@@ -116,7 +135,8 @@ def main():
     target_class_index = weights.meta["categories"].index(target_class)
 
     # Define the epsilon values for noise - these should be in the range [0,1]
-    epsilons = [0, .05, .1, .15, .2, .25, .3]
+    epsilons = [0, .05, .1, .15, .2, .25, .3, .35, .4, .45, .5]
+    #epsilons = [0, .01, .02, .03, .04, .5, .06, .07]
 
     # Set random seed for reproducibility
     torch.manual_seed(42)
