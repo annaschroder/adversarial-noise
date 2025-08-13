@@ -15,6 +15,8 @@ conda activate adversarial_noise
 ```
 
 ## running the code
+```shell
 python AdverserialNoise.py --image_path data/n01443537_goldfish.jpeg --target_class "magpie"
+```
 
 you can change the target_class to another ImageNet classification, or point to another image on your local system to run on another image.
