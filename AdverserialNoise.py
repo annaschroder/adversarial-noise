@@ -228,7 +228,7 @@ def main():
                 weights.meta["categories"][target_class_index]
                 )
 
-        plt.savefig(f"data/adversarial_noise_epsilon_{epsilons[epsilon_i]}.png")
+            plt.savefig(f"data/results/adversarial_comparison.png")
         epsilon_i += 1
 
 if __name__ == "__main__":
